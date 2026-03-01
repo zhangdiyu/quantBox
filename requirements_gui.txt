@@ -1,0 +1,21 @@
+
+# QuantBox GUI 依赖
+PyQt5&gt;=5.15.0
+pyqt5-tools&gt;=5.15.0
+
+# 可视化库
+plotly&gt;=5.0.0
+matplotlib&gt;=3.4.0
+mplfinance&gt;=0.12.0
+
+# 数据处理
+pandas&gt;=1.3.0
+numpy&gt;=1.21.0
+
+# 数据源
+akshare&gt;=1.8.0
+tushare&gt;=1.2.0
+
+# 进度条
+tqdm&gt;=4.60.0
+
