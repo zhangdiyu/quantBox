@@ -163,6 +163,10 @@ class MainWindow(QMainWindow):
         download_indices_action.triggered.connect(self._download_indices)
         tools_menu.addAction(download_indices_action)
 
+        download_etf_action = QAction("下载ETF数据", self)
+        download_etf_action.triggered.connect(self._download_etf)
+        tools_menu.addAction(download_etf_action)
+
         # ---- 帮助 ----
         help_menu = menubar.addMenu("帮助(&H)")
         about_action = QAction("关于", self)
@@ -266,6 +270,13 @@ class MainWindow(QMainWindow):
         self.status_label.setText("正在启动指数下载...")
         QMessageBox.information(
             self, "提示", "请在终端运行:\npython src/download_indices.py"
+        )
+
+    def _download_etf(self):
+        self.status_label.setText("正在启动ETF数据下载...")
+        QMessageBox.information(
+            self, "提示", "请在终端运行:\npython src/download_etf.py\n\n"
+            "ETF数据将保存到 data/etf/ 目录"
         )
 
     def _refresh(self):
