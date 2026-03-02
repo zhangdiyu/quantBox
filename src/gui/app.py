@@ -43,6 +43,10 @@ def set_dark_theme(app):
 
 def main():
     """主函数"""
+    # 抑制 Windows 上 "Unable to open default EUDC font" 警告
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "")
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts.warning=false")
+
     app = QApplication(sys.argv)
     app.setApplicationName("QuantBox - 量化研究平台")
     app.setOrganizationName("QuantBox")

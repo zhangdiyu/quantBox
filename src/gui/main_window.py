@@ -38,6 +38,7 @@ from gui.chart_panel import ChartPanel
 from gui.backtest_panel import BacktestPanel
 from gui.portfolio_panel import PortfolioPanel
 from gui.indicator_designer import IndicatorDesigner
+from gui.market_sense_panel import MarketSensePanel
 
 
 class MainWindow(QMainWindow):
@@ -79,12 +80,14 @@ class MainWindow(QMainWindow):
         self.backtest_panel = BacktestPanel()
         self.portfolio_panel = PortfolioPanel()
         self.indicator_designer = IndicatorDesigner()
+        self.market_sense_panel = MarketSensePanel()
 
         self.tab_widget.addTab(self.data_panel, "数据管理")
         self.tab_widget.addTab(self.chart_panel, "K线图表")
         self.tab_widget.addTab(self.backtest_panel, "策略回测")
         self.tab_widget.addTab(self.portfolio_panel, "持仓管理")
         self.tab_widget.addTab(self.indicator_designer, "指标设计器")
+        self.tab_widget.addTab(self.market_sense_panel, "盘感锻炼")
         main_layout.addWidget(self.tab_widget)
 
         self._create_stock_dock()
