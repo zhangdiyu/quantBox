@@ -258,8 +258,8 @@ def calculate_indicator(df, period=14):
     delta = df['收盘'].diff()
     
     # 分离涨跌
-    gain = (delta.where(delta &gt; 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta &lt; 0, 0)).rolling(window=period).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     
     # 计算RSI
     rs = gain / loss

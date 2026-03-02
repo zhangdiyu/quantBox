@@ -15,7 +15,7 @@ import json
 
 # 配置
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(SCRIPT_DIR, "data")
+DATA_DIR = os.path.join(SCRIPT_DIR, "..", "data")
 PROGRESS_FILE = os.path.join(SCRIPT_DIR, "update_progress.json")
 
 # 确保数据目录存在

@@ -77,14 +77,15 @@ class DataPanel(QWidget):
         """刷新数据列表"""
         data_type = self.data_type_combo.currentText()
         
+        # 与 data_updater / data_reader 保持一致，数据在项目根目录的 data/ 下
         if data_type == "股票数据":
-            data_dir = Path(__file__).parent.parent / "data"
+            data_dir = Path(__file__).parent.parent.parent / "data"
         else:
-            data_dir = Path(__file__).parent.parent / "data" / "indices"
+            data_dir = Path(__file__).parent.parent.parent / "data" / "indices"
         
         self.data_table.setRowCount(0)
         
-        if not data_dir.exists():
+        if data_dir.exists():
             csv_files = list(data_dir.glob("*.csv"))
             
             for i, csv_file in enumerate(csv_files):
@@ -93,12 +94,12 @@ class DataPanel(QWidget):
                     filename = csv_file.name
                     parts = filename.replace(".csv", "").split("_")
                     
-                    if len(parts) &gt;= 2:
+                    if len(parts) >= 2:
                         code = parts[0]
                         name = "_".join(parts[1:])
                     else:
-                        code = parts[0] if len(parts) &gt; 0 else ""
-                        name = parts[1] if len(parts) &gt; 1 else ""
+                        code = parts[0] if len(parts) > 0 else ""
+                        name = parts[1] if len(parts) > 1 else ""
                     
                     # 读取行数
                     try:
@@ -138,9 +139,9 @@ class DataPanel(QWidget):
         data_type = self.data_type_combo.currentText()
         
         if data_type == "股票数据":
-            data_dir = Path(__file__).parent.parent / "data"
+            data_dir = Path(__file__).parent.parent.parent / "data"
         else:
-            data_dir = Path(__file__).parent.parent / "data" / "indices"
+            data_dir = Path(__file__).parent.parent.parent / "data" / "indices"
             
         file_path = data_dir / filename
         

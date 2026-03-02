@@ -222,7 +222,7 @@ class SignalAlertSystem(QWidget):
         start = self.start_time.time()
         end = self.end_time.time()
         
-        if not (start &lt;= current_time &lt;= end):
+        if not (start <= current_time <= end):
             return
             
         # TODO: 实现真实的信号检查逻辑
