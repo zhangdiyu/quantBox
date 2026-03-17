@@ -1,0 +1,7 @@
+{
+  "name": "成交量动量",
+  "code": "df['factor'] = df['volume'].pct_change(periods=5)",
+  "ic": 0.18132804881695938,
+  "rank_ic": 0.16796891502773856,
+  "created": "2026-03-17 19:38:09"
+}

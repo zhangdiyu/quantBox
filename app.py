@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import streamlit as st
+import indicators as ind_registry
 
 def read_csv(filepath):
     """通用CSV读取函数，支持多种格式"""
@@ -262,9 +263,9 @@ def show_home():
         stocks = get_available_stocks()
         st.metric("可用股票", len(stocks))
     with col2:
-        st.metric("技术指标", "10+")
+        st.metric("技术指标", len(ind_registry.list_names()))
     with col3:
-        st.metric("策略模板", "1")
+        st.metric("策略模板", "9+")
 
 def show_data_explorer():
     """数据浏览器"""
@@ -288,34 +289,53 @@ def show_data_explorer():
     with col2:
         end_date = st.date_input("结束日期", datetime.now())
     
-    st.sidebar.header("技术指标")
-    show_ma = st.sidebar.checkbox("移动平均线 (MA)", value=True)
-    show_ema = st.sidebar.checkbox("指数移动平均 (EMA)", value=False)
-    show_macd = st.sidebar.checkbox("MACD", value=False)
-    show_rsi = st.sidebar.checkbox("RSI", value=False)
-    show_bollinger = st.sidebar.checkbox("布林带", value=False)
-    
+    # ── 动态加载技术指标选择 ──
+    all_indicators = ind_registry.get_all()
+    selected_indicators = []  # list of (info, params_dict)
+
+    for cat_name, ind_list in all_indicators.items():
+        st.sidebar.header(cat_name)
+        for info in ind_list:
+            enabled = st.sidebar.checkbox(info['label'], value=(info['name'] in ('MA',)), key=f"ind_{info['name']}")
+            if not enabled:
+                continue
+            # 收集该指标的参数
+            params = {}
+            for p in info.get('params', []):
+                pk = f"{info['name']}_{p['key']}"
+                if p['type'] == 'int':
+                    params[p['key']] = st.sidebar.slider(p['label'], p.get('min', 1), p.get('max', 100), p['default'], key=pk)
+                elif p['type'] == 'float':
+                    params[p['key']] = st.sidebar.slider(p['label'], p.get('min', 0.0), p.get('max', 10.0), p['default'], step=p.get('step', 0.1), key=pk)
+                elif p['type'] == 'multi_select':
+                    params[p['key']] = st.sidebar.multiselect(p['label'], p['options'], default=p['default'], key=pk)
+            selected_indicators.append((info, params))
+
     df = load_stock_data(stock_code, str(start_date), str(end_date))
-    
+
     if df is None or len(df) == 0:
         st.error("无法加载数据")
         return
-    
+
     st.subheader(f"股票: {stock_code}")
-    
+
+    # 列名映射
+    close_col = 'close' if 'close' in df.columns else '收盘'
+    high_col = 'high' if 'high' in df.columns else '最高'
+    low_col = 'low' if 'low' in df.columns else '最低'
+    open_col = 'open' if 'open' in df.columns else '开盘'
+    vol_col = 'volume' if 'volume' in df.columns else '成交量'
+    date_col = 'date' if 'date' in df.columns else '日期'
+
     # 显示基本信息
-    if 'close' in df.columns:
+    if close_col in df.columns:
         col1, col2, col3, col4 = st.columns(4)
         latest = df.iloc[-1]
         prev = df.iloc[-2] if len(df) > 1 else latest
-        close_col = 'close' if 'close' in df.columns else '收盘'
-        high_col = 'high' if 'high' in df.columns else '最高'
-        low_col = 'low' if 'low' in df.columns else '最低'
-        vol_col = 'volume' if 'volume' in df.columns else '成交量'
-        
+
         change = latest[close_col] - prev[close_col]
         change_pct = (change / prev[close_col]) * 100 if prev[close_col] != 0 else 0
-        
+
         with col1:
             st.metric("收盘价", f"{latest[close_col]:.2f}", f"{change:+.2f} ({change_pct:+.2f}%)")
         with col2:
@@ -325,158 +345,126 @@ def show_data_explorer():
         with col4:
             if vol_col in df.columns:
                 st.metric("成交量", f"{int(latest[vol_col]):,}")
-    
-    # 计算技术指标
+
+    # ── 计算指标并绘图 ──
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-    
-    # 计算需要的指标
+
     df_plot = df.copy()
-    date_col = 'date' if 'date' in df_plot.columns else '日期'
-    open_col = 'open' if 'open' in df_plot.columns else '开盘'
-    high_col = 'high' if 'high' in df_plot.columns else '最高'
-    low_col = 'low' if 'low' in df_plot.columns else '最低'
-    close_col = 'close' if 'close' in df_plot.columns else '收盘'
-    vol_col = 'volume' if 'volume' in df_plot.columns else '成交量'
-    
-    # 计算子图数量
-    n_rows = 1
+    dates = df_plot[date_col].dt.strftime('%Y-%m-%d').tolist()
+    color_up = '#ef5350'
+    color_down = '#26a69a'
+
+    # 计算所有选中指标
+    calc_results = []
+    for info, params in selected_indicators:
+        calc_fn = info['calc']
+        kw = dict(params)
+        # 映射列名
+        import inspect
+        sig = inspect.signature(calc_fn)
+        if 'col' in sig.parameters:
+            kw.setdefault('col', close_col)
+        if 'close' in sig.parameters:
+            kw.setdefault('close', close_col)
+        if 'high' in sig.parameters:
+            kw.setdefault('high', high_col)
+        if 'low' in sig.parameters:
+            kw.setdefault('low', low_col)
+        if 'volume' in sig.parameters:
+            kw.setdefault('volume', vol_col)
+        # multi_select 类型需要逐个调用
+        multi_key = None
+        for p in info.get('params', []):
+            if p['type'] == 'multi_select':
+                multi_key = p['key']
+                break
+        if multi_key and isinstance(kw.get(multi_key), list):
+            for val in kw[multi_key]:
+                single_kw = dict(kw)
+                single_kw[multi_key] = val
+                df_plot, _ = calc_fn(df_plot, **single_kw)
+                calc_results.append((info, single_kw))
+        else:
+            df_plot, _ = calc_fn(df_plot, **kw)
+            calc_results.append((info, kw))
+
+    # 确定子图布局
+    has_volume = vol_col in df_plot.columns
+    # 独立子图指标（非叠加、非成交量叠加）
+    subplot_indicators = [(info, kw) for info, kw in calc_results if not info.get('overlay') and not info.get('on_volume')]
+    # 去重（同名指标只占一行）
+    seen_names = set()
+    unique_subplots = []
+    for info, kw in subplot_indicators:
+        if info['name'] not in seen_names:
+            seen_names.add(info['name'])
+            unique_subplots.append((info, kw))
+
+    n_rows = 1  # K线
     row_heights = [4]
-    if vol_col in df_plot.columns:
+    if has_volume:
         n_rows += 1
         row_heights.append(1)
-    if show_macd:
+    for _ in unique_subplots:
         n_rows += 1
         row_heights.append(1)
-    if show_rsi:
-        n_rows += 1
-        row_heights.append(1)
-    
-    # 创建子图
+
     fig = make_subplots(
         rows=n_rows, cols=1,
         shared_xaxes=True,
         row_heights=row_heights,
         vertical_spacing=0.05
     )
-    
-    color_up = '#ef5350'
-    color_down = '#26a69a'
-    dates = df_plot[date_col].dt.strftime('%Y-%m-%d').tolist()
-    
-    # K线图
+
+    # K线
     fig.add_trace(
         go.Candlestick(
-            x=dates,
-            open=df_plot[open_col],
-            high=df_plot[high_col],
-            low=df_plot[low_col],
-            close=df_plot[close_col],
-            name='K线',
-            increasing_line_color=color_up,
-            decreasing_line_color=color_down
+            x=dates, open=df_plot[open_col], high=df_plot[high_col],
+            low=df_plot[low_col], close=df_plot[close_col],
+            name='K线', increasing_line_color=color_up, decreasing_line_color=color_down
         ),
         row=1, col=1
     )
-    
-    # MA均线
-    if show_ma:
-        ma_config = [(5, '#ffeb3b'), (10, '#ff9800'), (20, '#e91e63'), (60, '#2196f3')]
-        for period, color in ma_config:
-            if len(df_plot) >= period:
-                ma = df_plot[close_col].rolling(window=period, min_periods=1).mean()
-                fig.add_trace(
-                    go.Scatter(x=dates, y=ma, name=f'MA{period}', line=dict(color=color, width=1)),
-                    row=1, col=1
-                )
-    
-    # EMA
-    if show_ema:
-        ema_config = [(12, '#9c27b0'), (26, '#00bcd4')]
-        for period, color in ema_config:
-            if len(df_plot) >= period:
-                ema = df_plot[close_col].ewm(span=period, adjust=False).mean()
-                fig.add_trace(
-                    go.Scatter(x=dates, y=ema, name=f'EMA{period}', line=dict(color=color, width=1, dash='dash')),
-                    row=1, col=1
-                )
-    
-    # 布林带
-    if show_bollinger:
-        if len(df_plot) >= 20:
-            mid = df_plot[close_col].rolling(window=20, min_periods=1).mean()
-            std = df_plot[close_col].rolling(window=20, min_periods=1).std()
-            upper = mid + 2 * std
-            lower = mid - 2 * std
-            fig.add_trace(
-                go.Scatter(x=dates, y=upper, name='BB Upper', line=dict(color='gray', width=1), opacity=0.5),
-                row=1, col=1
-            )
-            fig.add_trace(
-                go.Scatter(x=dates, y=lower, name='BB Lower', line=dict(color='gray', width=1), fill='tonexty', opacity=0.2),
-                row=1, col=1
-            )
-    
+
+    # 叠加指标（画在K线行）
+    for info, kw in calc_results:
+        if info.get('overlay'):
+            info['plot'](fig, df_plot, dates, row=1, **kw)
+
     current_row = 2
-    
+
     # 成交量
-    if vol_col in df_plot.columns:
-        colors = [color_up if row[close_col] >= row[open_col] else color_down for _, row in df_plot.iterrows()]
+    if has_volume:
+        colors = [color_up if df_plot[close_col].iloc[i] >= df_plot[open_col].iloc[i] else color_down for i in range(len(df_plot))]
         fig.add_trace(
             go.Bar(x=dates, y=df_plot[vol_col], name='成交量', marker_color=colors, opacity=0.8),
             row=current_row, col=1
         )
+        # 成交量叠加指标
+        for info, kw in calc_results:
+            if info.get('on_volume'):
+                info['plot'](fig, df_plot, dates, row=current_row, **kw)
         fig.update_yaxes(title_text='成交量', row=current_row, col=1)
         current_row += 1
-    
-    # MACD
-    if show_macd:
-        ema_f = df_plot[close_col].ewm(span=12, adjust=False).mean()
-        ema_s = df_plot[close_col].ewm(span=26, adjust=False).mean()
-        dif = ema_f - ema_s
-        dea = dif.ewm(span=9, adjust=False).mean()
-        hist = (dif - dea) * 2
-        
-        hist_colors = [color_up if v >= 0 else color_down for v in hist]
-        fig.add_trace(
-            go.Bar(x=dates, y=hist, name='Histogram', marker_color=hist_colors, opacity=0.7),
-            row=current_row, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=dates, y=dif, name='DIF', line=dict(color='#ffeb3b', width=1)),
-            row=current_row, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=dates, y=dea, name='DEA', line=dict(color='#2196f3', width=1)),
-            row=current_row, col=1
-        )
-        fig.update_yaxes(title_text='MACD', row=current_row, col=1)
+
+    # 独立子图指标
+    subplot_row_map = {}
+    for info, kw in unique_subplots:
+        subplot_row_map[info['name']] = current_row
         current_row += 1
-    
-    # RSI
-    if show_rsi:
-        delta = df_plot[close_col].diff()
-        gain = delta.where(delta > 0, 0.0).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
-        rs = gain / loss.replace(0, 1e-10)
-        rsi = (100 - (100 / (1 + rs))).fillna(50)
-        
-        fig.add_trace(
-            go.Scatter(x=dates, y=rsi, name='RSI14', line=dict(color='#ab47bc', width=1)),
-            row=current_row, col=1
-        )
-        fig.add_hline(y=70, line_dash='dash', line_color='#ef5350', row=current_row, col=1)
-        fig.add_hline(y=30, line_dash='dash', line_color='#26a69a', row=current_row, col=1)
-        fig.update_yaxes(title_text='RSI', row=current_row, col=1, range=[0, 100])
-    
+    for info, kw in calc_results:
+        if not info.get('overlay') and not info.get('on_volume') and info['name'] in subplot_row_map:
+            info['plot'](fig, df_plot, dates, row=subplot_row_map[info['name']], **kw)
+
     fig.update_layout(
         height=400 + (n_rows - 1) * 150,
         xaxis_rangeslider_visible=False,
         showlegend=True
     )
-    
+
     st.plotly_chart(fig, use_container_width=True)
-    
+
     with st.expander("查看原始数据"):
         st.dataframe(df, use_container_width=True)
 
@@ -486,11 +474,12 @@ def show_backtest():
     
     st.sidebar.header("策略选择")
 
-    # 构建策略列表，包含已保存的因子策略
+    # 构建策略列表
     base_strategies = ["双均线策略", "MACD策略", "RSI策略", "布林带策略"]
+    indicator_strategies = ["KDJ策略", "CCI策略", "Williams %R策略", "ATR突破策略", "OBV策略"]
     saved_factors = _load_saved_factors()
     factor_strategies = [f"因子: {f['name']}" for f in saved_factors]
-    all_strategies = base_strategies + factor_strategies
+    all_strategies = base_strategies + indicator_strategies + factor_strategies
 
     strategy_name = st.sidebar.selectbox("选择策略", all_strategies)
 
@@ -574,6 +563,122 @@ def show_backtest():
             df['signal'] = 0
             df.loc[df['low'] <= lower, 'signal'] = 1
             df.loc[df['high'] >= upper, 'signal'] = -1
+            return df
+
+    elif strategy_name == "KDJ策略":
+        kdj_n = st.sidebar.slider("KDJ-N周期", 2, 30, 9, key="bt_kdj_n")
+        kdj_m1 = st.sidebar.slider("KDJ-M1平滑", 2, 10, 3, key="bt_kdj_m1")
+        kdj_m2 = st.sidebar.slider("KDJ-M2平滑", 2, 10, 3, key="bt_kdj_m2")
+        kdj_oversold = st.sidebar.slider("超卖阈值 (买入)", 5, 40, 20, key="bt_kdj_os")
+        kdj_overbought = st.sidebar.slider("超买阈值 (卖出)", 60, 95, 80, key="bt_kdj_ob")
+        strategy_kwargs = {'n': kdj_n, 'm1': kdj_m1, 'm2': kdj_m2,
+                           'oversold': kdj_oversold, 'overbought': kdj_overbought}
+
+        def strategy_func(df, **kwargs):
+            df = df.copy()
+            from indicators.momentum import calc_kdj
+            close_col = 'close' if 'close' in df.columns else '收盘'
+            high_col = 'high' if 'high' in df.columns else '最高'
+            low_col = 'low' if 'low' in df.columns else '最低'
+            df, _ = calc_kdj(df, n=kwargs['n'], m1=kwargs['m1'], m2=kwargs['m2'],
+                             high=high_col, low=low_col, close=close_col)
+            df['signal'] = 0
+            # J值超卖金叉买入，超买死叉卖出
+            buy = (df['KDJ_J'] < kwargs['oversold']) | \
+                  ((df['KDJ_K'] > df['KDJ_D']) & (df['KDJ_K'].shift(1) <= df['KDJ_D'].shift(1)))
+            sell = (df['KDJ_J'] > kwargs['overbought']) | \
+                   ((df['KDJ_K'] < df['KDJ_D']) & (df['KDJ_K'].shift(1) >= df['KDJ_D'].shift(1)))
+            df.loc[buy, 'signal'] = 1
+            df.loc[sell, 'signal'] = -1
+            return df
+
+    elif strategy_name == "CCI策略":
+        cci_period = st.sidebar.slider("CCI周期", 2, 50, 14, key="bt_cci_p")
+        cci_upper = st.sidebar.slider("超买阈值 (卖出)", 50, 200, 100, key="bt_cci_up")
+        cci_lower = st.sidebar.slider("超卖阈值 (买入)", -200, -50, -100, key="bt_cci_dn")
+        strategy_kwargs = {'period': cci_period, 'upper': cci_upper, 'lower': cci_lower}
+
+        def strategy_func(df, **kwargs):
+            df = df.copy()
+            from indicators.momentum import calc_cci
+            close_col = 'close' if 'close' in df.columns else '收盘'
+            high_col = 'high' if 'high' in df.columns else '最高'
+            low_col = 'low' if 'low' in df.columns else '最低'
+            df, _ = calc_cci(df, period=kwargs['period'], high=high_col, low=low_col, close=close_col)
+            key = f"CCI{kwargs['period']}"
+            df['signal'] = 0
+            # CCI从下穿越-100买入，从上穿越+100卖出
+            buy = (df[key] > kwargs['lower']) & (df[key].shift(1) <= kwargs['lower'])
+            sell = (df[key] < kwargs['upper']) & (df[key].shift(1) >= kwargs['upper'])
+            df.loc[buy, 'signal'] = 1
+            df.loc[sell, 'signal'] = -1
+            return df
+
+    elif strategy_name == "Williams %R策略":
+        wr_period = st.sidebar.slider("WR周期", 2, 50, 14, key="bt_wr_p")
+        wr_oversold = st.sidebar.slider("超卖阈值 (买入)", -100, -60, -80, key="bt_wr_os")
+        wr_overbought = st.sidebar.slider("超买阈值 (卖出)", -40, 0, -20, key="bt_wr_ob")
+        strategy_kwargs = {'period': wr_period, 'oversold': wr_oversold, 'overbought': wr_overbought}
+
+        def strategy_func(df, **kwargs):
+            df = df.copy()
+            from indicators.momentum import calc_williams
+            close_col = 'close' if 'close' in df.columns else '收盘'
+            high_col = 'high' if 'high' in df.columns else '最高'
+            low_col = 'low' if 'low' in df.columns else '最低'
+            df, _ = calc_williams(df, period=kwargs['period'], high=high_col, low=low_col, close=close_col)
+            key = f"WR{kwargs['period']}"
+            df['signal'] = 0
+            # WR从超卖区上穿买入，从超买区下穿卖出
+            buy = (df[key] > kwargs['oversold']) & (df[key].shift(1) <= kwargs['oversold'])
+            sell = (df[key] < kwargs['overbought']) & (df[key].shift(1) >= kwargs['overbought'])
+            df.loc[buy, 'signal'] = 1
+            df.loc[sell, 'signal'] = -1
+            return df
+
+    elif strategy_name == "ATR突破策略":
+        atr_period = st.sidebar.slider("ATR周期", 2, 50, 14, key="bt_atr_p")
+        atr_mult = st.sidebar.slider("突破倍数", 1.0, 5.0, 2.0, step=0.5, key="bt_atr_m")
+        strategy_kwargs = {'period': atr_period, 'mult': atr_mult}
+
+        def strategy_func(df, **kwargs):
+            df = df.copy()
+            from indicators.volatility import calc_atr
+            close_col = 'close' if 'close' in df.columns else '收盘'
+            high_col = 'high' if 'high' in df.columns else '最高'
+            low_col = 'low' if 'low' in df.columns else '最低'
+            df, _ = calc_atr(df, period=kwargs['period'], high=high_col, low=low_col, close=close_col)
+            key = f"ATR{kwargs['period']}"
+            # 价格突破前日收盘 + N倍ATR 买入，跌破前日收盘 - N倍ATR 卖出
+            prev_close = df[close_col].shift(1)
+            atr = df[key]
+            df['signal'] = 0
+            buy = df[close_col] > prev_close + kwargs['mult'] * atr
+            sell = df[close_col] < prev_close - kwargs['mult'] * atr
+            df.loc[buy, 'signal'] = 1
+            df.loc[sell, 'signal'] = -1
+            return df
+
+    elif strategy_name == "OBV策略":
+        obv_ma_period = st.sidebar.slider("OBV均线周期", 5, 60, 20, key="bt_obv_ma")
+        strategy_kwargs = {'ma_period': obv_ma_period}
+
+        def strategy_func(df, **kwargs):
+            df = df.copy()
+            from indicators.volume_ind import calc_obv
+            close_col = 'close' if 'close' in df.columns else '收盘'
+            vol_col = 'volume' if 'volume' in df.columns else '成交量'
+            df, _ = calc_obv(df, close=close_col, volume=vol_col)
+            if 'OBV' not in df.columns:
+                df['signal'] = 0
+                return df
+            obv_ma = df['OBV'].rolling(window=kwargs['ma_period'], min_periods=1).mean()
+            df['signal'] = 0
+            # OBV上穿均线买入，下穿卖出
+            buy = (df['OBV'] > obv_ma) & (df['OBV'].shift(1) <= obv_ma.shift(1))
+            sell = (df['OBV'] < obv_ma) & (df['OBV'].shift(1) >= obv_ma.shift(1))
+            df.loc[buy, 'signal'] = 1
+            df.loc[sell, 'signal'] = -1
             return df
 
     elif strategy_name.startswith("因子: "):
@@ -705,7 +810,23 @@ def show_backtest():
                     shares = 0
                 
                 equity_curve[i] = cash + shares * price
-            
+
+            # 回测结束时强制平仓
+            if shares > 0:
+                last_price = df[close_col].iloc[-1]
+                revenue = shares * last_price
+                comm = revenue * commission
+                tax = revenue * stamp_tax
+                cash += revenue - comm - tax
+                if trade_list and 'sell_date' not in trade_list[-1]:
+                    trade_list[-1]['sell_date'] = df[date_col].iloc[-1]
+                    trade_list[-1]['sell_price'] = last_price
+                    ret = (last_price - trade_list[-1]['buy_price']) / trade_list[-1]['buy_price']
+                    trade_list[-1]['return_pct'] = ret
+                    trade_list[-1]['forced_close'] = True
+                shares = 0
+                equity_curve[-1] = cash
+
             equity_curve = pd.Series(equity_curve, index=df[date_col])
             
             # 计算基准收益（简单持有）
@@ -823,7 +944,8 @@ def show_backtest():
             trade_df['买入价'] = trade_df['buy_price'].apply(lambda x: f"{x:.2f}")
             trade_df['卖出价'] = trade_df['sell_price'].apply(lambda x: f"{x:.2f}")
             trade_df['收益率'] = trade_df['return_pct'].apply(lambda x: f"{x:.2%}")
-            st.dataframe(trade_df[['买入日期', '卖出日期', '买入价', '卖出价', '收益率']], use_container_width=True)
+            trade_df['备注'] = trade_df.apply(lambda r: '期末平仓' if r.get('forced_close') else '', axis=1)
+            st.dataframe(trade_df[['买入日期', '卖出日期', '买入价', '卖出价', '收益率', '备注']], use_container_width=True)
 
 
 def calculate_metrics(equity_curve, benchmark, trade_list, initial_capital, df):
