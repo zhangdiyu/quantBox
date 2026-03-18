@@ -42,6 +42,12 @@ class StockDataReader:
             os.path.join(self.data_dir, f"{stock_code}.sz.csv"),
             os.path.join(self.data_dir, f"{stock_code}.sh.csv"),
         ]
+        
+        if os.path.exists(self.data_dir):
+            for filename in os.listdir(self.data_dir):
+                if filename.startswith(stock_code) and filename.endswith('.csv'):
+                    return os.path.join(self.data_dir, filename)
+        
         for candidate in candidates:
             if os.path.exists(candidate):
                 return candidate
@@ -74,12 +80,25 @@ class StockDataReader:
         
         df = pd.read_csv(file_path)
         
-        # 确保日期列存在
+        column_mapping = {
+            'trade_date': '日期',
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'vol': '成交量',
+            'volume': '成交量',
+            'amount': '成交额'
+        }
+        
+        df = df.rename(columns=column_mapping)
+        
         if '日期' in df.columns:
-            df['日期'] = pd.to_datetime(df['日期'])
-            df = df.sort_values('日期').reset_index(drop=True)
-        elif 'date' in df.columns:
-            df['日期'] = pd.to_datetime(df['date'])
+            if df['日期'].dtype == 'int64' or df['日期'].dtype == 'float64':
+                df['日期'] = pd.to_datetime(df['日期'].astype(str), format='%Y%m%d')
+            else:
+                df['日期'] = pd.to_datetime(df['日期'])
             df = df.sort_values('日期').reset_index(drop=True)
         
         # 日期过滤
